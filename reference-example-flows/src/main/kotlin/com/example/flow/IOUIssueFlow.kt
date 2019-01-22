@@ -6,10 +6,14 @@ import com.example.contract.SanctionableIOUContract.Companion.IOU_CONTRACT_ID
 import com.example.flow.IOUIssueFlow.Acceptor
 import com.example.flow.IOUIssueFlow.Initiator
 import com.example.state.SanctionableIOUState
+import com.example.state.SanctionedEntities
 import net.corda.core.contracts.Command
+import net.corda.core.contracts.ReferencedStateAndRef
+import net.corda.core.contracts.StateAndRef
 import net.corda.core.contracts.requireThat
 import net.corda.core.flows.*
 import net.corda.core.identity.Party
+import net.corda.core.node.StatesToRecord
 import net.corda.core.transactions.SignedTransaction
 import net.corda.core.transactions.TransactionBuilder
 import net.corda.core.utilities.ProgressTracker
@@ -27,6 +31,7 @@ import net.corda.core.utilities.ProgressTracker.Step
  * All methods called within the [FlowLogic] sub-class need to be annotated with the @Suspendable annotation.
  */
 object IOUIssueFlow {
+
     @InitiatingFlow
     @StartableByRPC
     class Initiator(
@@ -71,7 +76,7 @@ object IOUIssueFlow {
 
             // Stage 1.
             progressTracker.currentStep = GENERATING_TRANSACTION
-            // Generate an unsigned transaction.
+            val sanctionsListToUse = getSanctionsList(sanctionsBody)
             val iouState = SanctionableIOUState(iouValue, serviceHub.myInfo.legalIdentities.first(), otherParty)
             val txCommand =
                 Command(
@@ -81,7 +86,11 @@ object IOUIssueFlow {
 
             val txBuilder = TransactionBuilder(notary)
                 .addOutputState(iouState, IOU_CONTRACT_ID)
-                .addCommand(txCommand)
+                .addCommand(txCommand).apply {
+                    sanctionsListToUse?.let {
+                        this.addReferenceState(ReferencedStateAndRef(sanctionsListToUse))
+                    }
+                }
 
             // Stage 2.
             progressTracker.currentStep = VERIFYING_TRANSACTION
@@ -116,6 +125,20 @@ object IOUIssueFlow {
                 )
             )
         }
+
+        @Suspendable
+        fun getSanctionsList(sanctionsBody: Party) : StateAndRef<SanctionedEntities>? {
+            var existingList = serviceHub.vaultService.queryBy(SanctionedEntities::class.java).states.singleOrNull()
+            if (existingList == null){
+                existingList = getLatestSanctionsList(sanctionsBody)
+            }
+            return existingList
+        }
+
+        @Suspendable
+        fun getLatestSanctionsList(sanctionsBody: Party) : StateAndRef<SanctionedEntities>? {
+            return subFlow(GetSanctionsListFlow.Initiator(sanctionsBody)).firstOrNull()
+        }
     }
 
     @InitiatedBy(Initiator::class)
@@ -132,7 +155,11 @@ object IOUIssueFlow {
             }
             val txId = subFlow(signTransactionFlow).id
 
-            return subFlow(ReceiveFinalityFlow(otherPartySession, expectedTxId = txId))
+            val recordedTx = subFlow(ReceiveFinalityFlow(otherPartySession, expectedTxId = txId, statesToRecord = StatesToRecord.ALL_VISIBLE))
+            return recordedTx
         }
     }
+
+
+
 }

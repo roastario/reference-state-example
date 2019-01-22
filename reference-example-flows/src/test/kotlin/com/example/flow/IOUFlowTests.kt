@@ -1,35 +1,49 @@
 package com.example.flow
 
 import com.example.state.SanctionableIOUState
+import com.example.state.SanctionedEntities
 import net.corda.core.contracts.TransactionVerificationException
+import net.corda.core.flows.NotaryException
 import net.corda.core.identity.Party
-import net.corda.core.node.services.queryBy
 import net.corda.core.utilities.getOrThrow
+import net.corda.testing.common.internal.testNetworkParameters
 import net.corda.testing.core.singleIdentity
 import net.corda.testing.node.MockNetwork
+import net.corda.testing.node.MockNetworkParameters
 import net.corda.testing.node.StartedMockNode
 import org.junit.After
 import org.junit.Before
+import org.junit.Ignore
 import org.junit.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
+import java.time.Duration
+import java.time.temporal.ChronoUnit
 
 class IOUFlowTests {
     lateinit var network: MockNetwork
     lateinit var a: StartedMockNode
     lateinit var b: StartedMockNode
+    lateinit var c: StartedMockNode
     lateinit var issuer: StartedMockNode
     lateinit var issuerParty: Party
 
     @Before
     fun setup() {
-        network = MockNetwork(listOf("com.example.contract", "com.example.schema"))
+        network = MockNetwork(
+            listOf("com.example.contract", "com.example.schema"), MockNetworkParameters(
+                networkParameters = testNetworkParameters(
+                    minimumPlatformVersion = 4
+                )
+            )
+        )
         a = network.createPartyNode()
         b = network.createPartyNode()
+        c = network.createPartyNode()
+
         issuer = network.createPartyNode()
         issuerParty = issuer.info.legalIdentities.single()
         // For real nodes this happens automatically, but we have to manually register the flow for tests.
-        listOf(a, b).forEach { it.registerInitiatedFlow(IOUIssueFlow.Acceptor::class.java) }
+        listOf(a, b, c).forEach { it.registerInitiatedFlow(IOUIssueFlow.Acceptor::class.java) }
+        listOf(issuer).forEach { it.registerInitiatedFlow(GetSanctionsListFlow.Acceptor::class.java) }
         network.runNetwork()
     }
 
@@ -38,88 +52,162 @@ class IOUFlowTests {
         network.stopNodes()
     }
 
-    @Test
-    fun `flow rejects invalid IOUs`() {
-        val flow = IOUIssueFlow.Initiator(-1, b.info.singleIdentity(), issuerParty)
-        val future = a.startFlow(flow)
-        network.runNetwork()
-
-        // The IOUContract specifies that IOUs cannot have negative values.
-        assertFailsWith<TransactionVerificationException> { future.getOrThrow() }
-    }
-
-    @Test
-    fun `SignedTransaction returned by the flow is signed by the initiator`() {
+    @Test(expected = TransactionVerificationException.ContractRejection::class)
+    fun `deal fails if there is no issued sanctions list`() {
         val flow = IOUIssueFlow.Initiator(1, b.info.singleIdentity(), issuerParty)
         val future = a.startFlow(flow)
         network.runNetwork()
 
         val signedTx = future.getOrThrow()
         signedTx.verifySignaturesExcept(b.info.singleIdentity().owningKey)
+
+        println(signedTx.coreTransaction.outputsOfType(SanctionableIOUState::class.java).single())
     }
 
     @Test
-    fun `SignedTransaction returned by the flow is signed by the acceptor`() {
+    fun `deal succeeds with issued sanctions`() {
+        val issuanceFlow = issuer.startFlow(IssueSanctionsListFlow.Initiator())
+        network.runNetwork()
+        issuanceFlow.getOrThrow()
+
+
         val flow = IOUIssueFlow.Initiator(1, b.info.singleIdentity(), issuerParty)
         val future = a.startFlow(flow)
         network.runNetwork()
 
         val signedTx = future.getOrThrow()
-        signedTx.verifySignaturesExcept(a.info.singleIdentity().owningKey)
+        signedTx.verifySignaturesExcept(b.info.singleIdentity().owningKey)
+
     }
 
-    @Test
-    fun `flow records a transaction in both parties' transaction storages`() {
+    @Test(expected = TransactionVerificationException.ContractRejection::class)
+    fun `deal is rejected if party is sanctioned`() {
+        val issuanceFlow = issuer.startFlow(IssueSanctionsListFlow.Initiator())
+        network.runNetwork()
+        issuanceFlow.getOrThrow()
+
+        val updateFuture = issuer.startFlow(UpdateSanctionsListFlow.Initiator(b.info.legalIdentities.first()))
+        network.runNetwork()
+        updateFuture.getOrThrow()
+
         val flow = IOUIssueFlow.Initiator(1, b.info.singleIdentity(), issuerParty)
         val future = a.startFlow(flow)
         network.runNetwork()
-        val signedTx = future.getOrThrow()
 
-        // We check the recorded transaction in both transaction storages.
-        for (node in listOf(a, b)) {
-            assertEquals(signedTx, node.services.validatedTransactions.getTransaction(signedTx.id))
-        }
-    }
-
-    @Test
-    fun `recorded transaction has no inputs and a single output, the input IOU`() {
-        val iouValue = 1
-        val flow = IOUIssueFlow.Initiator(iouValue, b.info.singleIdentity(), issuerParty)
-        val future = a.startFlow(flow)
-        network.runNetwork()
-        val signedTx = future.getOrThrow()
-
-        // We check the recorded transaction in both vaults.
-        for (node in listOf(a, b)) {
-            val recordedTx = node.services.validatedTransactions.getTransaction(signedTx.id)
-            val txOutputs = recordedTx!!.tx.outputs
-            assert(txOutputs.size == 1)
-
-            val recordedState = txOutputs[0].data as SanctionableIOUState
-            assertEquals(recordedState.value, iouValue)
-            assertEquals(recordedState.lender, a.info.singleIdentity())
-            assertEquals(recordedState.borrower, b.info.singleIdentity())
-        }
-    }
-
-    @Test
-    fun `flow records the correct IOU in both parties' vaults`() {
-        val iouValue = 1
-        val flow = IOUIssueFlow.Initiator(1, b.info.singleIdentity(), issuerParty)
-        val future = a.startFlow(flow)
-        network.runNetwork()
         future.getOrThrow()
+    }
 
-        // We check the recorded IOU in both vaults.
-        for (node in listOf(a, b)) {
-            node.transaction {
-                val ious = node.services.vaultService.queryBy<SanctionableIOUState>().states
-                assertEquals(1, ious.size)
-                val recordedState = ious.single().state.data
-                assertEquals(recordedState.value, iouValue)
-                assertEquals(recordedState.lender, a.info.singleIdentity())
-                assertEquals(recordedState.borrower, b.info.singleIdentity())
-            }
-        }
+    @Test(expected = NotaryException::class)
+    fun `deal fails if list is updated after collection`() {
+        val issuanceFlow = issuer.startFlow(IssueSanctionsListFlow.Initiator())
+        network.runNetwork()
+        issuanceFlow.getOrThrow()
+
+
+        val flow1 = IOUIssueFlow.Initiator(1, b.info.singleIdentity(), issuerParty)
+        val future1 = a.startFlow(flow1)
+        network.runNetwork()
+
+        val signedTx1 = future1.getOrThrow()
+        signedTx1.verifySignaturesExcept(b.info.singleIdentity().owningKey)
+
+        val updateFuture = issuer.startFlow(UpdateSanctionsListFlow.Initiator(c.info.legalIdentities.first()))
+        network.runNetwork()
+        updateFuture.getOrThrow()
+
+        val flow2 = IOUIssueFlow.Initiator(1, b.info.singleIdentity(), issuerParty)
+        val future2 = a.startFlow(flow2)
+        network.runNetwork()
+
+        future2.getOrThrow()
+    }
+
+    @Test()
+    fun `deal succeeds if list is collected again after update`() {
+        val issuanceFlow = issuer.startFlow(IssueSanctionsListFlow.Initiator())
+        network.runNetwork()
+        issuanceFlow.getOrThrow()
+
+
+        val dealFlow1 = IOUIssueFlow.Initiator(1, b.info.singleIdentity(), issuerParty)
+        val dealFuture1 = a.startFlow(dealFlow1)
+        network.runNetwork()
+
+        val signedTx1 = dealFuture1.getOrThrow()
+        signedTx1.verifySignaturesExcept(b.info.singleIdentity().owningKey)
+
+        val updateFuture = issuer.startFlow(UpdateSanctionsListFlow.Initiator(c.info.legalIdentities.first()))
+        network.runNetwork()
+        updateFuture.getOrThrow()
+
+        //update on node a only
+        val getUpdatedListAgain = a.startFlow(GetSanctionsListFlow.Initiator(issuerParty))
+        network.runNetwork()
+        getUpdatedListAgain.getOrThrow()
+
+        val dealFlow2 = IOUIssueFlow.Initiator(1, b.info.singleIdentity(), issuerParty)
+        val dealFuture2 = a.startFlow(dealFlow2)
+        network.runNetwork()
+        dealFuture2.getOrThrow()
+
+        //perform deal with b again
+        val dealFlow3 = IOUIssueFlow.Initiator(1, b.info.singleIdentity(), issuerParty)
+        val dealFuture3 = a.startFlow(dealFlow3)
+        network.runNetwork()
+
+        dealFuture3.getOrThrow()
+
+    }
+
+    @Ignore("Current behaviour does not result in the reference state in counterparties vault")
+    @Test
+    fun `during tx resolution, latest ref state is provided to counterparty`() {
+        val issuanceFlow = issuer.startFlow(IssueSanctionsListFlow.Initiator())
+        network.runNetwork()
+        issuanceFlow.getOrThrow()
+
+
+        val dealFlow1 = IOUIssueFlow.Initiator(1, b.info.singleIdentity(), issuerParty)
+        val dealFuture1 = a.startFlow(dealFlow1)
+        network.runNetwork()
+
+        val signedTx1 = dealFuture1.getOrThrow()
+        signedTx1.verifySignaturesExcept(b.info.singleIdentity().owningKey)
+
+        val updateFuture = issuer.startFlow(UpdateSanctionsListFlow.Initiator(c.info.legalIdentities.first()))
+        network.runNetwork()
+        updateFuture.getOrThrow()
+
+        //update on node a only
+        val getUpdatedListAgain = a.startFlow(GetSanctionsListFlow.Initiator(issuerParty))
+        network.runNetwork()
+        getUpdatedListAgain.getOrThrow()
+
+        val dealFlow2 = IOUIssueFlow.Initiator(1, b.info.singleIdentity(), issuerParty)
+        val dealFuture2 = a.startFlow(dealFlow2)
+        network.runNetwork()
+        dealFuture2.getOrThrow()
+
+        //perform deal with b again
+        val dealFlow3 = IOUIssueFlow.Initiator(1, b.info.singleIdentity(), issuerParty)
+        val dealFuture3 = a.startFlow(dealFlow3)
+        network.runNetwork()
+
+
+        dealFuture3.getOrThrow()
+
+
+        val items = b.services.vaultService.queryBy(SanctionedEntities::class.java)
+
+
+        //take down issuer, so isn't able to provide new list to node b
+        issuer.stop()
+
+        val dealFlow4 = IOUIssueFlow.Initiator(1, a.info.singleIdentity(), issuerParty)
+        val dealFuture4 = b.startFlow(dealFlow4)
+        network.runNetwork()
+
+        dealFuture4.getOrThrow(timeout = Duration.of(30, ChronoUnit.MINUTES))
+
     }
 }
