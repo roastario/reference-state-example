@@ -8,6 +8,12 @@
       <module name="kotlin-source_integrationTest" target="1.8" />
       <module name="kotlin-source_main" target="1.8" />
       <module name="kotlin-source_test" target="1.8" />
+      <module name="reference-example-contracts_integrationTest" target="1.8" />
+      <module name="reference-example-contracts_main" target="1.8" />
+      <module name="reference-example-contracts_test" target="1.8" />
+      <module name="reference-example-flows_integrationTest" target="1.8" />
+      <module name="reference-example-flows_main" target="1.8" />
+      <module name="reference-example-flows_test" target="1.8" />
     </bytecodeTargetLevel>
   </component>
   <component name="JavacSettings">
