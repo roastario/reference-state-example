@@ -2,7 +2,7 @@ package com.example.flow
 
 import co.paralleluniverse.fibers.Suspendable
 import com.example.contract.SanctionedEntitiesContract
-import com.example.flow.ExampleFlow.Acceptor
+import com.example.flow.IOUIssueFlow.Acceptor
 import com.example.flow.IssueSanctionsListFlow.Initiator
 import com.example.state.SanctionedEntities
 import net.corda.core.contracts.Command

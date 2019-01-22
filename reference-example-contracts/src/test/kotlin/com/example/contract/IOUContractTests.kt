@@ -29,7 +29,6 @@ class IOUContractTests {
         )
     )
 
-
     private val sanctions = SanctionedEntities(listOf(naughtyCorp.party), issuer.party)
 
     private val iouValue = 1
@@ -40,10 +39,28 @@ class IOUContractTests {
         ledgerServices.ledger {
             transaction {
                 output(IOU_CONTRACT_ID, SanctionableIOUState(iouValue, miniCorp.party, megaCorp.party))
+                command(
+                    listOf(megaCorp.publicKey, miniCorp.publicKey),
+                    SanctionableIOUContract.Commands.Create(issuer.party)
+                )
                 fails()
                 reference(SANCTIONS_CONTRACT_ID, sanctions)
-                command(listOf(megaCorp.publicKey, miniCorp.publicKey), SanctionableIOUContract.Commands.Create())
                 verifies()
+            }
+        }
+    }
+
+    @Test
+    fun `should not allow lender to be sanctioned`() {
+        ledgerServices.ledger {
+            transaction {
+                output(IOU_CONTRACT_ID, SanctionableIOUState(iouValue, naughtyCorp.party, megaCorp.party))
+                reference(SANCTIONS_CONTRACT_ID, sanctions)
+                command(
+                    listOf(naughtyCorp.publicKey, megaCorp.publicKey),
+                    SanctionableIOUContract.Commands.Create(issuer.party)
+                )
+                `fails with`("The lender O=NaughtyCorp, L=Moscow, C=RU is a sanctioned entity")
             }
         }
     }
@@ -55,7 +72,10 @@ class IOUContractTests {
                 output(IOU_CONTRACT_ID, SanctionableIOUState(iouValue, miniCorp.party, megaCorp.party))
                 reference(SANCTIONS_CONTRACT_ID, sanctions)
                 fails()
-                command(listOf(megaCorp.publicKey, miniCorp.publicKey), SanctionableIOUContract.Commands.Create())
+                command(
+                    listOf(megaCorp.publicKey, miniCorp.publicKey),
+                    SanctionableIOUContract.Commands.Create(issuer.party)
+                )
                 verifies()
             }
         }
@@ -68,7 +88,10 @@ class IOUContractTests {
                 reference(SANCTIONS_CONTRACT_ID, sanctions)
                 input(IOU_CONTRACT_ID, SanctionableIOUState(iouValue, miniCorp.party, megaCorp.party))
                 output(IOU_CONTRACT_ID, SanctionableIOUState(iouValue, miniCorp.party, megaCorp.party))
-                command(listOf(megaCorp.publicKey, miniCorp.publicKey), SanctionableIOUContract.Commands.Create())
+                command(
+                    listOf(megaCorp.publicKey, miniCorp.publicKey),
+                    SanctionableIOUContract.Commands.Create(issuer.party)
+                )
                 `fails with`("No inputs should be consumed when issuing an IOU.")
             }
         }
@@ -81,7 +104,10 @@ class IOUContractTests {
                 reference(SANCTIONS_CONTRACT_ID, sanctions)
                 output(IOU_CONTRACT_ID, SanctionableIOUState(iouValue, miniCorp.party, megaCorp.party))
                 output(IOU_CONTRACT_ID, SanctionableIOUState(iouValue, miniCorp.party, megaCorp.party))
-                command(listOf(megaCorp.publicKey, miniCorp.publicKey), SanctionableIOUContract.Commands.Create())
+                command(
+                    listOf(megaCorp.publicKey, miniCorp.publicKey),
+                    SanctionableIOUContract.Commands.Create(issuer.party)
+                )
                 `fails with`("Only one output state should be created.")
             }
         }
@@ -93,7 +119,7 @@ class IOUContractTests {
             transaction {
                 reference(SANCTIONS_CONTRACT_ID, sanctions)
                 output(IOU_CONTRACT_ID, SanctionableIOUState(iouValue, miniCorp.party, megaCorp.party))
-                command(miniCorp.publicKey, SanctionableIOUContract.Commands.Create())
+                command(miniCorp.publicKey, SanctionableIOUContract.Commands.Create(issuer.party))
                 `fails with`("All of the participants must be signers.")
             }
         }
@@ -105,7 +131,7 @@ class IOUContractTests {
             transaction {
                 reference(SANCTIONS_CONTRACT_ID, sanctions)
                 output(IOU_CONTRACT_ID, SanctionableIOUState(iouValue, miniCorp.party, megaCorp.party))
-                command(megaCorp.publicKey, SanctionableIOUContract.Commands.Create())
+                command(megaCorp.publicKey, SanctionableIOUContract.Commands.Create(issuer.party))
                 `fails with`("All of the participants must be signers.")
             }
         }
@@ -117,7 +143,10 @@ class IOUContractTests {
             transaction {
                 reference(SANCTIONS_CONTRACT_ID, sanctions)
                 output(IOU_CONTRACT_ID, SanctionableIOUState(iouValue, megaCorp.party, megaCorp.party))
-                command(listOf(megaCorp.publicKey, miniCorp.publicKey), SanctionableIOUContract.Commands.Create())
+                command(
+                    listOf(megaCorp.publicKey, miniCorp.publicKey),
+                    SanctionableIOUContract.Commands.Create(issuer.party)
+                )
                 `fails with`("The lender and the borrower cannot be the same entity.")
             }
         }
@@ -129,7 +158,10 @@ class IOUContractTests {
             transaction {
                 reference(SANCTIONS_CONTRACT_ID, sanctions)
                 output(IOU_CONTRACT_ID, SanctionableIOUState(-1, miniCorp.party, megaCorp.party))
-                command(listOf(megaCorp.publicKey, miniCorp.publicKey), SanctionableIOUContract.Commands.Create())
+                command(
+                    listOf(megaCorp.publicKey, miniCorp.publicKey),
+                    SanctionableIOUContract.Commands.Create(issuer.party)
+                )
                 `fails with`("The IOU's value must be non-negative.")
             }
         }

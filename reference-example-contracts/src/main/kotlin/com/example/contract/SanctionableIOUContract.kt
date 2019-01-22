@@ -6,6 +6,7 @@ import net.corda.core.contracts.CommandData
 import net.corda.core.contracts.Contract
 import net.corda.core.contracts.requireSingleCommand
 import net.corda.core.contracts.requireThat
+import net.corda.core.identity.Party
 import net.corda.core.transactions.LedgerTransaction
 
 /**
@@ -31,6 +32,7 @@ class SanctionableIOUContract : Contract {
      * considered valid.
      */
     override fun verify(tx: LedgerTransaction) {
+        val command = tx.commands.requireSingleCommand<Commands.Create>()
 
 
         require(tx.referenceInputRefsOfType(SanctionedEntities::class.java).singleOrNull() != null) {
@@ -38,11 +40,10 @@ class SanctionableIOUContract : Contract {
         }
 
         val sanctionedEntities = tx.referenceInputRefsOfType(SanctionedEntities::class.java).single().state.data
-        require(sanctionedEntities.issuer.name.organisation == "SanctionsIssuer") {
-            "${sanctionedEntities.issuer.name.organisation} is an invalid issuer of sanctions lists"
+        require(sanctionedEntities.issuer.name == command.value.sanctionsBody.name) {
+            "${sanctionedEntities.issuer.name.organisation} is an invalid issuer of sanctions lists for this contract"
         }
 
-        val command = tx.commands.requireSingleCommand<Commands.Create>()
         requireThat {
             // Generic constraints around the IOU transaction.
             "No inputs should be consumed when issuing an IOU." using (tx.inputs.isEmpty())
@@ -64,6 +65,6 @@ class SanctionableIOUContract : Contract {
      * This contract only implements one command, Create.
      */
     interface Commands : CommandData {
-        class Create : Commands
+        class Create(val sanctionsBody: Party) : Commands
     }
 }

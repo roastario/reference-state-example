@@ -3,8 +3,8 @@ package com.example.flow
 import co.paralleluniverse.fibers.Suspendable
 import com.example.contract.SanctionableIOUContract
 import com.example.contract.SanctionableIOUContract.Companion.IOU_CONTRACT_ID
-import com.example.flow.ExampleFlow.Acceptor
-import com.example.flow.ExampleFlow.Initiator
+import com.example.flow.IOUIssueFlow.Acceptor
+import com.example.flow.IOUIssueFlow.Initiator
 import com.example.state.SanctionableIOUState
 import net.corda.core.contracts.Command
 import net.corda.core.contracts.requireThat
@@ -26,12 +26,13 @@ import net.corda.core.utilities.ProgressTracker.Step
  *
  * All methods called within the [FlowLogic] sub-class need to be annotated with the @Suspendable annotation.
  */
-object ExampleFlow {
+object IOUIssueFlow {
     @InitiatingFlow
     @StartableByRPC
     class Initiator(
         val iouValue: Int,
-        val otherParty: Party
+        val otherParty: Party,
+        val sanctionsBody: Party
     ) : FlowLogic<SignedTransaction>() {
         /**
          * The progress tracker checkpoints each stage of the flow and outputs the specified messages when each
@@ -73,7 +74,11 @@ object ExampleFlow {
             // Generate an unsigned transaction.
             val iouState = SanctionableIOUState(iouValue, serviceHub.myInfo.legalIdentities.first(), otherParty)
             val txCommand =
-                Command(SanctionableIOUContract.Commands.Create(), iouState.participants.map { it.owningKey })
+                Command(
+                    SanctionableIOUContract.Commands.Create(sanctionsBody),
+                    iouState.participants.map { it.owningKey })
+
+
             val txBuilder = TransactionBuilder(notary)
                 .addOutputState(iouState, IOU_CONTRACT_ID)
                 .addCommand(txCommand)
