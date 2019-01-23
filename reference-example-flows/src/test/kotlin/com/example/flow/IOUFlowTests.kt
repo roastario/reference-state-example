@@ -13,7 +13,6 @@ import net.corda.testing.node.MockNetworkParameters
 import net.corda.testing.node.StartedMockNode
 import org.junit.After
 import org.junit.Before
-import org.junit.Ignore
 import org.junit.Test
 import java.time.Duration
 import java.time.temporal.ChronoUnit
@@ -159,17 +158,24 @@ class IOUFlowTests {
 
     }
 
-    @Ignore("Current behaviour does not result in the reference state in counterparties vault")
+    //    @Ignore("Current behaviour does not result in the reference state in counterparties vault")
     @Test
     fun `during tx resolution, latest ref state is provided to counterparty`() {
         val issuanceFlow = issuer.startFlow(IssueSanctionsListFlow.Initiator())
         network.runNetwork()
-        issuanceFlow.getOrThrow()
+        val issuanceStateRef = issuanceFlow.getOrThrow()
+
+        val listOnIssuer = issuer.services.vaultService.queryBy(SanctionedEntities::class.java).states.first()
 
 
         val dealFlow1 = IOUIssueFlow.Initiator(1, b.info.singleIdentity(), issuerParty)
         val dealFuture1 = a.startFlow(dealFlow1)
         network.runNetwork()
+
+        val listOnA = a.services.vaultService.queryBy(SanctionedEntities::class.java).states.firstOrNull()
+        val listOnB = b.services.vaultService.queryBy(SanctionedEntities::class.java).states.firstOrNull()
+
+        val issuanceTxOnB = b.services.validatedTransactions.getTransaction(issuanceStateRef.ref.txhash)
 
         val signedTx1 = dealFuture1.getOrThrow()
         signedTx1.verifySignaturesExcept(b.info.singleIdentity().owningKey)
@@ -195,10 +201,6 @@ class IOUFlowTests {
 
 
         dealFuture3.getOrThrow()
-
-
-        val items = b.services.vaultService.queryBy(SanctionedEntities::class.java)
-
 
         //take down issuer, so isn't able to provide new list to node b
         issuer.stop()
