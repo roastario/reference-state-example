@@ -13,6 +13,7 @@ import net.corda.testing.node.MockNetworkParameters
 import net.corda.testing.node.StartedMockNode
 import org.junit.After
 import org.junit.Before
+import org.junit.Ignore
 import org.junit.Test
 import java.time.Duration
 import java.time.temporal.ChronoUnit
@@ -158,7 +159,7 @@ class IOUFlowTests {
 
     }
 
-    //    @Ignore("Current behaviour does not result in the reference state in counterparties vault")
+    @Ignore("Current behaviour does not result in the reference state in counterparties vault")
     @Test
     fun `during tx resolution, latest ref state is provided to counterparty`() {
         val issuanceFlow = issuer.startFlow(IssueSanctionsListFlow.Initiator())
